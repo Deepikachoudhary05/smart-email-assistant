@@ -1,43 +1,16 @@
-# Credentials & API Keys
-credentials.json
-token.pickle
 .env
-.env.local
-
-# Python
-venv/
-__pycache__/
-*.pyc
-*.pyo
-*.egg-info/
-dist/
-build/
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# Database
-*.db
-*.sqlite
-*.sqlite3
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Logs
-*.log
-
-__pycache__/
-*.pyc
-
 .env.*
 !.env.example
+.vercel/
 .venv/
-token.json
-*.pickle
+venv/
+__pycache__/
+.pytest_cache/
+*.pyc
 credentials*.json
+token*
+*.pickle
+*.db
+*.sqlite*
+*.log
 install_log*.txt

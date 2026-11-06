@@ -1,10 +1,11 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
+from app.security import require_owner
 from pydantic import BaseModel
 from typing import Optional
 from app.services.gmail_service import gmail_service
 from app.models.email_model import Email, Draft
 
-router = APIRouter(prefix="/api/emails", tags=["emails"])
+router = APIRouter(prefix="/api/emails", tags=["emails"], dependencies=[Depends(require_owner)])
 
 
 # Pydantic models for request/response
@@ -32,7 +33,7 @@ class DraftResponse(BaseModel):
 
 
 @router.get("/fetch")
-async def fetch_emails():
+def fetch_emails():
     """
     Fetch unread emails from Gmail and save to database
     """
@@ -58,12 +59,14 @@ async def fetch_emails():
             'saved': saved_count,
             'emails': emails
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail='Email operation failed')
 
 
 @router.get("/list")
-async def list_emails():
+def list_emails():
     """
     Get all emails from database
     """
@@ -74,12 +77,14 @@ async def list_emails():
             'count': len(emails),
             'emails': emails
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail='Email operation failed')
 
 
 @router.get("/{email_id}")
-async def get_email(email_id: int):
+def get_email(email_id: int):
     """
     Get specific email by ID
     """
@@ -95,11 +100,11 @@ async def get_email(email_id: int):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail='Email operation failed')
 
 
 @router.get("/drafts/list")
-async def list_drafts():
+def list_drafts():
     """
     Get all drafts from database
     """
@@ -110,12 +115,14 @@ async def list_drafts():
             'count': len(drafts),
             'drafts': drafts
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail='Email operation failed')
 
 
 @router.get("/drafts/{email_id}")
-async def get_email_drafts(email_id: int):
+def get_email_drafts(email_id: int):
     """
     Get all drafts for a specific email
     """
@@ -126,16 +133,20 @@ async def get_email_drafts(email_id: int):
             'count': len(drafts),
             'drafts': drafts
         }
+    except HTTPException:
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail='Email operation failed')
 
 
 @router.post("/drafts/create")
-async def create_draft(request: DraftCreateRequest):
+def create_draft(request: DraftCreateRequest):
     """
     Create a draft in Gmail and save to database
     """
     try:
+        if not Email.get_by_id(request.email_id):
+            raise HTTPException(status_code=404, detail="Email not found")
         # Create draft in Gmail
         gmail_draft = gmail_service.create_draft(
             request.recipient_email,
@@ -164,4 +175,4 @@ async def create_draft(request: DraftCreateRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail='Email operation failed')

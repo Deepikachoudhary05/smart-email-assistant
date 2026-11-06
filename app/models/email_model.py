@@ -1,91 +1,46 @@
-from app.database.db import get_db_connection
-from datetime import datetime
-
+from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from app.database.db import get_engine, emails, drafts
 
 class Email:
     def __init__(self, gmail_id, sender, subject, body):
-        self.gmail_id = gmail_id
-        self.sender = sender
-        self.subject = subject
-        self.body = body
+        self.values = dict(gmail_id=gmail_id, sender=sender, subject=subject, body=body)
 
     def save(self):
-        """Save email to database"""
-        conn = get_db_connection()
-        c = conn.cursor()
-        try:
-            c.execute('''
-                INSERT INTO emails (gmail_id, sender, subject, body)
-                VALUES (?, ?, ?, ?)
-            ''', (self.gmail_id, self.sender, self.subject, self.body))
-            conn.commit()
-            email_id = c.lastrowid
-            return email_id
-        except Exception as e:
-            print(f"Error saving email: {e}")
-            return None
-        finally:
-            conn.close()
+        engine = get_engine()
+        with engine.begin() as conn:
+            if engine.dialect.name == 'postgresql':
+                stmt = pg_insert(emails).values(**self.values).on_conflict_do_nothing(index_elements=['gmail_id']).returning(emails.c.id)
+                return conn.execute(stmt).scalar_one_or_none()
+            if conn.execute(select(emails.c.id).where(emails.c.gmail_id == self.values['gmail_id'])).first():
+                return None
+            return conn.execute(emails.insert().values(**self.values)).inserted_primary_key[0]
 
     @staticmethod
     def get_all():
-        """Get all emails from database"""
-        conn = get_db_connection()
-        c = conn.cursor()
-        emails = c.execute('SELECT * FROM emails').fetchall()
-        conn.close()
-        return [dict(email) for email in emails]
+        with get_engine().connect() as conn:
+            return [dict(row) for row in conn.execute(select(emails).order_by(emails.c.id)).mappings()]
 
     @staticmethod
     def get_by_id(email_id):
-        """Get email by ID"""
-        conn = get_db_connection()
-        c = conn.cursor()
-        email = c.execute('SELECT * FROM emails WHERE id = ?', (email_id,)).fetchone()
-        conn.close()
-        return dict(email) if email else None
-
+        with get_engine().connect() as conn:
+            row = conn.execute(select(emails).where(emails.c.id == email_id)).mappings().first()
+            return dict(row) if row else None
 
 class Draft:
     def __init__(self, email_id, recipient_email, subject, body, analysis=None):
-        self.email_id = email_id
-        self.recipient_email = recipient_email
-        self.subject = subject
-        self.body = body
-        self.analysis = analysis
+        self.values = dict(email_id=email_id, recipient_email=recipient_email, subject=subject, body=body, analysis=analysis)
 
     def save(self):
-        """Save draft to database"""
-        conn = get_db_connection()
-        c = conn.cursor()
-        try:
-            c.execute('''
-                INSERT INTO drafts (email_id, recipient_email, subject, body, analysis)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (self.email_id, self.recipient_email, self.subject, self.body, self.analysis))
-            conn.commit()
-            draft_id = c.lastrowid
-            return draft_id
-        except Exception as e:
-            print(f"Error saving draft: {e}")
-            return None
-        finally:
-            conn.close()
+        with get_engine().begin() as conn:
+            return conn.execute(drafts.insert().values(**self.values)).inserted_primary_key[0]
 
     @staticmethod
     def get_all():
-        """Get all drafts"""
-        conn = get_db_connection()
-        c = conn.cursor()
-        drafts = c.execute('SELECT * FROM drafts').fetchall()
-        conn.close()
-        return [dict(draft) for draft in drafts]
+        with get_engine().connect() as conn:
+            return [dict(row) for row in conn.execute(select(drafts).order_by(drafts.c.id)).mappings()]
 
     @staticmethod
     def get_by_email_id(email_id):
-        """Get drafts for specific email"""
-        conn = get_db_connection()
-        c = conn.cursor()
-        drafts = c.execute('SELECT * FROM drafts WHERE email_id = ?', (email_id,)).fetchall()
-        conn.close()
-        return [dict(draft) for draft in drafts]
+        with get_engine().connect() as conn:
+            return [dict(row) for row in conn.execute(select(drafts).where(drafts.c.email_id == email_id)).mappings()]
