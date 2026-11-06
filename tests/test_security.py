@@ -31,7 +31,7 @@ def client(monkeypatch, tmp_path):
 
 AUTH = {'Authorization': 'Bearer ' + 'a' * 48}
 
-@pytest.mark.parametrize('method,path', [('get','/api/emails/fetch'), ('get','/api/emails/list'), ('get','/api/emails/1'), ('get','/api/emails/drafts/list'), ('get','/api/emails/drafts/1'), ('post','/api/emails/drafts/create'), ('post','/auth/google/start'), ('get','/auth/google/status'), ('delete','/auth/google/connection'), ('post','/admin/database/initialize')])
+@pytest.mark.parametrize('method,path', [('get','/api/emails/fetch'), ('get','/api/emails/list'), ('get','/api/emails/1'), ('get','/api/emails/drafts/list'), ('get','/api/emails/drafts/1'), ('post','/api/emails/drafts/create'), ('post','/auth/google/start'), ('get','/auth/google/status'), ('delete','/auth/google/connection'), ('post','/admin/database/initialize'), ('get','/api/workspace'), ('post','/api/emails/1/reply')])
 def test_routes_require_owner(client, method, path):
     assert getattr(client, method)(path).status_code == 401
     assert getattr(client, method)(path, headers={'Authorization': 'Bearer wrong'}).status_code == 401
@@ -106,3 +106,57 @@ def test_vercel_refuses_sqlite(client, monkeypatch):
     get_engine.cache_clear()
     with pytest.raises(RuntimeError):
         get_engine()
+
+
+def test_dashboard_is_public_but_data_is_protected(client):
+    r = client.get('/')
+    assert r.status_code == 200
+    assert 'text/html' in r.headers['content-type']
+    assert 'Make room for what matters' in r.text
+    assert 'Cache-Control' in r.headers
+    assert client.get('/assets/app.js').status_code == 200
+    assert client.get('/assets/style.css').status_code == 200
+    assert client.get('/api/workspace').status_code == 401
+
+
+def test_status_contains_flags_not_secrets(client, monkeypatch):
+    monkeypatch.setenv('GEMINI_API_KEY', 'private-test-key')
+    r = client.get('/api/workspace', headers=AUTH)
+    assert r.json() == {'oauth_configured': True, 'ai_configured': True, 'database_configured': True}
+    assert 'private-test-key' not in r.text
+    assert 'test-secret' not in r.text
+
+
+def test_reply_requires_provider_configuration(client, monkeypatch):
+    monkeypatch.delenv('GEMINI_API_KEY', raising=False)
+    assert client.post('/api/emails/1/reply', headers=AUTH, json={}).status_code == 503
+
+
+def test_reply_generation_and_validation(client, monkeypatch):
+    from app.services import gemini_service
+    monkeypatch.setenv('GEMINI_API_KEY', 'test-key')
+    eid = Email('test-ai', 'sender@example.com', 'Test', 'Email body').save()
+    def generate(body, tone, context):
+        assert body == 'Email body'
+        assert tone == 'Friendly'
+        assert context == 'Thank them'
+        return 'Thanks for reaching out.'
+    monkeypatch.setattr(gemini_service, 'generate_email_reply', generate)
+    r = client.post(f'/api/emails/{eid}/reply', headers=AUTH, json={'tone':'Friendly','context':'Thank them'})
+    assert r.status_code == 200
+    assert r.json()['reply'] == 'Thanks for reaching out.'
+    assert client.post(f'/api/emails/{eid}/reply', headers=AUTH, json={'tone':'bad'}).status_code == 422
+    assert client.post(f'/api/emails/{eid}/reply', headers=AUTH, json={'context':'x'*2001}).status_code == 422
+    assert client.post('/api/emails/999/reply', headers=AUTH, json={}).status_code == 404
+
+
+def test_reply_failure_does_not_leak_provider_error(client, monkeypatch):
+    from app.services import gemini_service
+    monkeypatch.setenv('GEMINI_API_KEY', 'private-test-key')
+    eid = Email('test-error', 'sender@example.com', 'Test', 'Body').save()
+    def fail(*args, **kwargs):
+        raise RuntimeError('private-test-key')
+    monkeypatch.setattr(gemini_service, 'generate_email_reply', fail)
+    r = client.post(f'/api/emails/{eid}/reply', headers=AUTH, json={})
+    assert r.status_code == 502
+    assert 'private-test-key' not in r.text

@@ -1,7 +1,8 @@
 from fastapi import APIRouter, HTTPException, Depends
 from app.security import require_owner
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Literal
+from pydantic import Field
 from app.services.gmail_service import gmail_service
 from app.models.email_model import Email, Draft
 
@@ -176,3 +177,25 @@ def create_draft(request: DraftCreateRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail='Email operation failed')
+
+class ReplyRequest(BaseModel):
+    tone: Literal['Professional', 'Friendly', 'Concise'] = 'Professional'
+    context: str = Field(default='', max_length=2000)
+
+
+@router.post('/{email_id}/reply')
+def generate_reply(email_id: int, request: ReplyRequest):
+    import os
+    from app.services.gemini_service import generate_email_reply
+    if not os.getenv('GEMINI_API_KEY'):
+        raise HTTPException(503, 'AI replies are not configured. Add GEMINI_API_KEY in Vercel and redeploy.')
+    try:
+        email = Email.get_by_id(email_id)
+        if not email:
+            raise HTTPException(404, 'Email not found')
+        reply = generate_email_reply(email['body'] or '', tone=request.tone, context=request.context)
+        return {'reply': reply}
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(502, 'AI could not generate a reply. Please try again later.') from None

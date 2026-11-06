@@ -1,14 +1,27 @@
 # Smart Email Assistant
 
-A single-owner FastAPI backend for reading Gmail messages and creating drafts, with hosted PostgreSQL storage, web OAuth, and authenticated API access. There is no separate frontend. Creating a draft never sends it.
+A single-owner FastAPI backend for reading Gmail messages and creating drafts, with hosted PostgreSQL storage, web OAuth, and authenticated API access. A responsive web dashboard is served by the same FastAPI app at `/`. Creating a draft never sends it.
+
+## Dashboard
+
+Open the production root URL for the web interface. The initial preview contains clearly labeled sample emails, local sample reply templates, and preview drafts held only in memory. Preview mode does not call Gmail or Gemini and does not access private data.
+
+Choose **Use my inbox** and enter the owner key to unlock real data. The key and loaded private content remain in tab memory only; locking, refreshing, or leaving the page clears them. The generated Vercel secret is not readable afterward: if you do not have the owner key, replace `APP_API_KEY` with your own random key (at least 32 characters) in Vercel and redeploy.
+
+- **Inbox:** search messages, sync unread Gmail messages, select an email, and edit a reply.
+- **AI reply:** choose a tone and optional context; requires `GEMINI_API_KEY`. All suggestions must be reviewed.
+- **Drafts:** copy a reply or save it as a Gmail draft. Nothing is sent automatically.
+- **Connections:** authorize Gmail, see setup status, and disconnect Gmail with confirmation.
+
+Authorize Gmail from the Connections page and follow the returned authorization link in the same browser. Return to the dashboard after approval; its connection status refreshes on focus. The existing Google Web OAuth setup requirement still applies.
 
 ## Hosting changes
 
 - SQLAlchemy + psycopg use a hosted PostgreSQL `DATABASE_URL`, TLS, and no process-local connection pool. SQLite is accepted only with `APP_ENV=test` outside Vercel.
 - Gmail uses Google's Web application OAuth flow with PKCE. A short-lived HttpOnly browser cookie binds the callback to the browser that started authorization. One-time state is consumed atomically in the database.
 - Gmail credentials are encrypted using Fernet before being stored in PostgreSQL. Refreshes are persisted. No pickle, token file, local browser listener, or import-time authentication is used.
-- All email, draft, connection-management, and initialization endpoints require `Authorization: Bearer <APP_API_KEY>`. Missing authentication configuration fails closed. `/`, `/health`, `/docs`, and the OAuth callback remain public; the callback requires valid state and a matching browser cookie.
-- No permissive CORS policy is enabled. Use `/docs` on the same origin or a trusted backend client. This is an owner API key, not a multi-user login system. Everyone with this key has access to the same mailbox and data.
+- All email, draft, connection-management, and initialization endpoints require `Authorization: Bearer <APP_API_KEY>`. Missing authentication configuration fails closed. The dashboard at `/`, static assets, `/health`, `/docs`, and the OAuth callback remain public; the callback requires valid state and a matching browser cookie.
+- No permissive CORS policy is enabled. Use the dashboard or `/docs` on the same origin, or a trusted backend client. This is an owner API key, not a multi-user login system. Everyone with this key has access to the same mailbox and data.
 
 ## Deployment configuration
 
@@ -58,7 +71,10 @@ All endpoints below require the owner bearer key unless marked public.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| GET | `/`, `/health` | Public service information; health checks process only, not provider readiness |
+| GET | `/` | Public dashboard with sample preview; real data requires owner authentication |
+| GET | `/health` | Public process health check, not provider readiness |
+| GET | `/api/workspace` | Owner-only configuration flags; no secret values |
+| POST | `/api/emails/{email_id}/reply` | Owner-only Gemini reply generation with tone and optional context |
 | POST | `/admin/database/initialize` | Create missing database tables |
 | POST | `/auth/google/start` | Start browser-bound Gmail OAuth; returns authorization URL |
 | GET | `/auth/google/callback` | Public OAuth callback, validated by state + browser cookie |
@@ -84,7 +100,7 @@ Draft request:
 
 `DELETE /auth/google/connection` disconnects this application locally. To revoke the Google grant itself, remove the app in your Google Account's third-party access settings. Stored emails and drafts remain in the database after disconnecting.
 
-The optional Gemini reply/proposal helpers remain service-layer functions; HTTP generation endpoints are not included in this version. The original Gmail-fetch GET endpoint is retained for compatibility even though it saves new rows. A Gmail draft and its local database record are separate operations; if the database write fails after Gmail succeeds, check Gmail before retrying to avoid duplicate drafts.
+The dashboard uses the authenticated `POST /api/emails/{email_id}/reply` endpoint for Gemini reply generation. The proposal helper remains a service-layer function. The original Gmail-fetch GET endpoint is retained for compatibility even though it saves new rows. A Gmail draft and its local database record are separate operations; if the database write fails after Gmail succeeds, check Gmail before retrying to avoid duplicate drafts.
 
 ## Verification
 
